@@ -31,57 +31,16 @@ interface Toast {
 
 export default function App() {
   // --- STATE ---
-  const [schools, setSchools] = useState<School[]>(() => {
-    const saved = localStorage.getItem("diba_gtk_schools");
-    return saved ? JSON.parse(saved) : initialSchools;
-  });
-
-  const [notifications, setNotifications] = useState<NotificationLog[]>(() => {
-    const saved = localStorage.getItem("diba_gtk_notifications");
-    if (saved) return JSON.parse(saved);
-
-    // Default Initial Notifications for pristine presentation
-    const initDate = new Date().toLocaleString("id-ID", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit"
-    });
-    return [
-      {
-        id: "init-1",
-        timestamp: initDate,
-        schoolName: "Sistem DIBA GTK",
-        npsn: "SYSTEM",
-        type: "sistem",
-        message: "Database awal berhasil dimuat seutuhnya dari file rekap rekap. 194 Lembaga Sekolah berhasil dipetakan ke sistem.",
-        isRead: false
-      },
-      {
-        id: "init-2",
-        timestamp: initDate,
-        schoolName: "Penyaringan Wilayah",
-        npsn: "WILAYAH",
-        type: "sistem",
-        message: "Sistem mendeteksi 3 area administratif aktif: Kabupaten Ciamis, Kota Banjar, dan Kabupaten Pangandaran.",
-        isRead: true
-      }
-    ];
-  });
-
+  const [schools, setSchools] = useState<School[]>([]);
+  const [notifications, setNotifications] = useState<NotificationLog[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [activeTab, setActiveTab] = useState<"overview" | "schools" | "import" | "notifications">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "schools" | "import" | "notifications" | "settings">("overview");
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [showNotificationPopup, setShowNotificationPopup] = useState(false);
-  const [periode, setPeriode] = useState<string>(() => {
-    return localStorage.getItem("diba_gtk_periode") || "Juli 2026";
-  });
+  const [periode, setPeriode] = useState<string>("Juli 2026");
   const [isEditingPeriod, setIsEditingPeriod] = useState(false);
-  const [tempPeriod, setTempPeriod] = useState(periode);
+  const [tempPeriod, setTempPeriod] = useState("Juli 2026");
   const [lastUpdated, setLastUpdated] = useState<string>(() => {
-    const saved = localStorage.getItem("diba_gtk_last_updated");
-    if (saved) return saved;
     return new Date().toLocaleString("id-ID", {
       day: "2-digit",
       month: "long",
@@ -99,22 +58,51 @@ export default function App() {
   const [passcode, setPasscode] = useState("");
   const [passcodeError, setPasscodeError] = useState("");
 
-  // --- LOCAL PERSISTENCE ---
-  useEffect(() => {
-    localStorage.setItem("diba_gtk_schools", JSON.stringify(schools));
-  }, [schools]);
+  // --- REAL-TIME EXPRESS BACKEND SYNCHRONIZATION ---
+  const fetchAllData = useCallback(() => {
+    // Fetch schools
+    fetch("/api/schools")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setSchools(data);
+        }
+      })
+      .catch((err) => console.error("Error fetching schools:", err));
 
+    // Fetch notifications
+    fetch("/api/notifications")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setNotifications(data);
+        }
+      })
+      .catch((err) => console.error("Error fetching notifications:", err));
+
+    // Fetch period
+    fetch("/api/period")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.period) {
+          setPeriode(data.period);
+          setTempPeriod(data.period);
+        }
+      })
+      .catch((err) => console.error("Error fetching period:", err));
+  }, []);
+
+  // Sync admin mode preference
   useEffect(() => {
     localStorage.setItem("diba_gtk_is_admin", isAdmin ? "true" : "false");
   }, [isAdmin]);
 
+  // Fetch immediately on mount, and poll every 5 seconds for absolute real-time sync across devices
   useEffect(() => {
-    localStorage.setItem("diba_gtk_notifications", JSON.stringify(notifications));
-  }, [notifications]);
-
-  useEffect(() => {
-    localStorage.setItem("diba_gtk_periode", periode);
-  }, [periode]);
+    fetchAllData();
+    const interval = setInterval(fetchAllData, 5000);
+    return () => clearInterval(interval);
+  }, [fetchAllData]);
 
   // --- LIVE TICKING CLOCK ---
   useEffect(() => {
@@ -134,7 +122,6 @@ export default function App() {
       second: "2-digit"
     }) + " WIB";
     setLastUpdated(formatted);
-    localStorage.setItem("diba_gtk_last_updated", formatted);
   }, []);
 
   const formattedTime = useMemo(() => {
@@ -163,239 +150,307 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // --- AUTOMATIC NOTIFICATION LOGGER ---
-  const addNotificationLog = useCallback(
-    (params: Omit<NotificationLog, "id" | "timestamp" | "isRead">) => {
-      const timestampString = new Date().toLocaleString("id-ID", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit"
-      });
-
-      const newNotif: NotificationLog = {
-        ...params,
-        id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-        timestamp: timestampString,
-        isRead: false
-      };
-
-      setNotifications((prev) => [newNotif, ...prev]);
-    },
-    []
-  );
+  // --- PERIOD MODIFIER ---
+  const handleUpdatePeriod = useCallback((p: string) => {
+    setPeriode(p);
+    setTempPeriod(p);
+    fetch("/api/period", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ period: p })
+    })
+      .then(() => {
+        addToast("Periode Diubah", `Periode usulan TPG berhasil diubah ke ${p}.`, "success");
+        fetchAllData();
+      })
+      .catch((err) => console.error("Error setting period:", err));
+  }, [fetchAllData, addToast]);
 
   // --- DATA MUTATORS ---
 
   // Update a single school status (Manually clicked in table)
   const handleUpdateSchool = useCallback(
     (npsn: string, fields: Partial<School>) => {
-      setSchools((prevSchools) => {
-        return prevSchools.map((school) => {
-          if (school.npsn !== npsn) return school;
+      const school = schools.find((s) => s.npsn === npsn);
+      if (!school) return;
 
-          // Detect significant changes to trigger automated notifications
-          const hasVerifikasiChanged =
-            fields.statusVerifikasi !== undefined &&
-            school.statusVerifikasi !== fields.statusVerifikasi;
-          
-          const hasUploadChanged =
-            fields.statusUpload !== undefined &&
-            school.statusUpload !== fields.statusUpload;
+      const hasVerifikasiChanged =
+        fields.statusVerifikasi !== undefined &&
+        school.statusVerifikasi !== fields.statusVerifikasi;
+      
+      const hasUploadChanged =
+        fields.statusUpload !== undefined &&
+        school.statusUpload !== fields.statusUpload;
 
-          if (hasVerifikasiChanged) {
-            addNotificationLog({
-              schoolName: school.nama,
-              npsn: school.npsn,
-              type: "verifikasi",
-              message:
-                fields.statusVerifikasi === "SUDAH"
-                  ? `Pemberkasan usulan TPG diverifikasi sukses oleh validator DIBA GTK.`
-                  : `Verifikasi usulan TPG ditarik kembali/dibatalkan oleh validator.`,
-              oldValue: school.statusVerifikasi,
-              newValue: fields.statusVerifikasi
-            });
+      let notificationMessage = "";
+      let notificationType: NotificationLog["type"] = "sistem";
+      let oldValue = "";
+      let newValue = "";
 
-            addToast(
-              "Perubahan Verifikasi",
-              `Status verifikasi ${school.nama} telah diubah menjadi ${fields.statusVerifikasi}.`,
-              fields.statusVerifikasi === "SUDAH" ? "success" : "warning"
-            );
-          } else if (hasUploadChanged) {
-            addNotificationLog({
-              schoolName: school.nama,
-              npsn: school.npsn,
-              type: "upload",
-              message:
-                fields.statusUpload === "SUDAH"
-                  ? `Sekolah berhasil melengkapi upload berkas kelayakan TPG.`
-                  : `Berkas usulan dinonaktifkan / dihapus dari server DIBA.`,
-              oldValue: school.statusUpload,
-              newValue: fields.statusUpload
-            });
+      if (hasVerifikasiChanged) {
+        notificationMessage = fields.statusVerifikasi === "SUDAH"
+          ? `Pemberkasan usulan TPG diverifikasi sukses oleh validator DIBA GTK.`
+          : `Verifikasi usulan TPG ditarik kembali/dibatalkan oleh validator.`;
+        notificationType = "verifikasi";
+        oldValue = school.statusVerifikasi;
+        newValue = fields.statusVerifikasi || "BELUM";
 
-            addToast(
-              "Status Unggahan",
-              `Status upload berkas ${school.nama} sekarang adalah ${fields.statusUpload}.`,
-              fields.statusUpload === "SUDAH" ? "success" : "info"
-            );
-          }
+        addToast(
+          "Perubahan Verifikasi",
+          `Status verifikasi ${school.nama} telah diubah menjadi ${fields.statusVerifikasi}.`,
+          fields.statusVerifikasi === "SUDAH" ? "success" : "warning"
+        );
+      } else if (hasUploadChanged) {
+        notificationMessage = fields.statusUpload === "SUDAH"
+          ? `Sekolah berhasil melengkapi upload berkas kelayakan TPG.`
+          : `Berkas usulan dinonaktifkan / dihapus dari server DIBA.`;
+        notificationType = "upload";
+        oldValue = school.statusUpload;
+        newValue = fields.statusUpload || "BELUM";
 
-          return { ...school, ...fields };
+        addToast(
+          "Status Unggahan",
+          `Status upload berkas ${school.nama} sekarang adalah ${fields.statusUpload}.`,
+          fields.statusUpload === "SUDAH" ? "success" : "info"
+        );
+      }
+
+      // Optimistically update local state
+      setSchools((prev) =>
+        prev.map((s) => (s.npsn === npsn ? { ...s, ...fields } : s))
+      );
+
+      // Save to server
+      fetch("/api/schools/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ npsn, updates: fields })
+      })
+        .then(() => fetchAllData())
+        .catch((err) => console.error("Error updating school:", err));
+
+      if (notificationMessage) {
+        const timestampString = new Date().toLocaleString("id-ID", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
         });
-      });
+
+        const newNotif = {
+          id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          timestamp: timestampString,
+          schoolName: school.nama,
+          npsn: school.npsn,
+          type: notificationType,
+          message: notificationMessage,
+          oldValue,
+          newValue,
+          isRead: false
+        };
+
+        // Optimistically add notification
+        setNotifications((prev) => [newNotif, ...prev]);
+
+        fetch("/api/notifications", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newNotif)
+        })
+          .then(() => fetchAllData())
+          .catch((err) => console.error("Error creating notification:", err));
+      }
+
       updateTimestamp();
     },
-    [addNotificationLog, addToast, updateTimestamp]
+    [schools, fetchAllData, addToast, updateTimestamp]
   );
 
   // Manually add school
   const handleAddSchool = useCallback(
     (newSchool: Omit<School, "no">) => {
-      setSchools((prev) => {
-        const nextNo = prev.length > 0 ? Math.max(...prev.map((s) => s.no)) + 1 : 1;
-        const schoolWithNo: School = {
-          ...newSchool,
-          no: nextNo
-        };
+      fetch("/api/schools/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newSchool)
+      })
+        .then((res) => {
+          if (!res.ok) {
+            return res.json().then((err) => {
+              throw new Error(err.error || "Gagal menambahkan sekolah.");
+            });
+          }
+          return res.json();
+        })
+        .then((result) => {
+          if (result.success) {
+            const addedSchool = result.school;
+            addToast(
+              "Lembaga Ditambahkan",
+              `${addedSchool.nama} berhasil didaftarkan di wilayah ${addedSchool.kabKota}.`,
+              "success"
+            );
 
-        addNotificationLog({
-          schoolName: schoolWithNo.nama,
-          npsn: schoolWithNo.npsn,
-          type: "sistem",
-          message: `Sekolah baru berhasil ditambahkan secara manual ke database usulan.`
+            const timestampString = new Date().toLocaleString("id-ID", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit"
+            });
+
+            const newNotif = {
+              id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              timestamp: timestampString,
+              schoolName: addedSchool.nama,
+              npsn: addedSchool.npsn,
+              type: "sistem" as const,
+              message: `Sekolah baru berhasil ditambahkan secara manual ke database usulan.`,
+              isRead: false
+            };
+
+            fetch("/api/notifications", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(newNotif)
+            }).then(() => fetchAllData());
+          }
+        })
+        .catch((err: any) => {
+          addToast("Gagal Menambahkan", err.message, "warning");
         });
 
-        addToast(
-          "Lembaga Ditambahkan",
-          `${schoolWithNo.nama} berhasil didaftarkan di wilayah ${schoolWithNo.kabKota}.`,
-          "success"
-        );
-
-        return [...prev, schoolWithNo];
-      });
       updateTimestamp();
     },
-    [addNotificationLog, addToast, updateTimestamp]
+    [fetchAllData, addToast, updateTimestamp]
   );
 
   // Manually delete school
   const handleDeleteSchool = useCallback(
     (npsn: string) => {
-      setSchools((prev) => {
-        const match = prev.find((s) => s.npsn === npsn);
-        if (!match) return prev;
+      const school = schools.find((s) => s.npsn === npsn);
+      if (!school) return;
 
-        addNotificationLog({
-          schoolName: match.nama,
-          npsn: match.npsn,
-          type: "sistem",
-          message: `Lembaga sekolah dihapus seutuhnya dari database pengusul TPG.`
-        });
+      // Optimistic delete
+      setSchools((prev) => prev.filter((s) => s.npsn !== npsn));
 
-        addToast("Lembaga Dihapus", `${match.nama} telah dikeluarkan dari pemantauan.`, "warning");
+      fetch("/api/schools/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ npsn })
+      })
+        .then(() => {
+          addToast("Lembaga Dihapus", `${school.nama} telah dikeluarkan dari pemantauan.`, "warning");
 
-        return prev.filter((s) => s.npsn !== npsn);
-      });
+          const timestampString = new Date().toLocaleString("id-ID", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit"
+          });
+
+          const newNotif = {
+            id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            timestamp: timestampString,
+            schoolName: school.nama,
+            npsn: school.npsn,
+            type: "sistem" as const,
+            message: `Lembaga sekolah dihapus seutuhnya dari database pengusul TPG.`,
+            isRead: false
+          };
+
+          fetch("/api/notifications", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(newNotif)
+          }).then(() => fetchAllData());
+        })
+        .catch((err) => console.error("Error deleting school:", err));
+
       updateTimestamp();
     },
-    [addNotificationLog, addToast, updateTimestamp]
+    [schools, fetchAllData, addToast, updateTimestamp]
   );
 
   // Bulk CSV Imports Handler
   const handleImportSchools = useCallback(
     (importedList: Omit<School, "no">[], mode: "merge" | "overwrite") => {
-      if (mode === "overwrite") {
-        const formattedList: School[] = importedList.map((item, index) => ({
-          ...item,
-          no: index + 1
-        }));
+      fetch("/api/schools/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imported: importedList, mode })
+      })
+        .then((res) => res.json())
+        .then((result) => {
+          if (result.success) {
+            setSchools(result.schools);
 
-        setSchools(formattedList);
+            const timestampString = new Date().toLocaleString("id-ID", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit"
+            });
 
-        addNotificationLog({
-          schoolName: "Sistem Sinkronisasi",
-          npsn: "CSV_BULK",
-          type: "import",
-          message: `Penggantian massal sukses! Seluruh database ditimpa dengan ${importedList.length} data baru dari CSV.`
-        });
+            if (mode === "overwrite") {
+              addToast(
+                "Database Ditimpa",
+                `Berhasil memuat seutuhnya ${importedList.length} sekolah baru dari file eksternal.`,
+                "success"
+              );
 
-        addToast(
-          "Database Ditimpa",
-          `Berhasil memuat seutuhnya ${importedList.length} sekolah baru dari file eksternal.`,
-          "success"
-        );
-      } else {
-        // MERGE / UPDATE MODE
-        setSchools((currentSchools) => {
-          let updatedCount = 0;
-          let addedCount = 0;
+              const newNotif = {
+                id: `notif-${Date.now()}`,
+                timestamp: timestampString,
+                schoolName: "Sistem Sinkronisasi",
+                npsn: "CSV_BULK",
+                type: "import" as const,
+                message: `Penggantian massal sukses! Seluruh database ditimpa dengan ${importedList.length} data baru dari CSV.`,
+                isRead: false
+              };
 
-          const updatedList = [...currentSchools];
-
-          importedList.forEach((imported) => {
-            const matchIndex = updatedList.findIndex((s) => s.npsn === imported.npsn);
-
-            if (matchIndex !== -1) {
-              const oldSchool = updatedList[matchIndex];
-              const verifikasiChanged = oldSchool.statusVerifikasi !== imported.statusVerifikasi;
-              const uploadChanged = oldSchool.statusUpload !== imported.statusUpload;
-
-              if (verifikasiChanged || uploadChanged) {
-                updatedCount++;
-                updatedList[matchIndex] = {
-                  ...oldSchool,
-                  nama: imported.nama, // Update name if spelling changed
-                  jenjang: imported.jenjang,
-                  kabKota: imported.kabKota,
-                  statusUpload: imported.statusUpload,
-                  statusVerifikasi: imported.statusVerifikasi
-                };
-
-                // Log automatic notification if verification changed significantly
-                if (verifikasiChanged) {
-                  addNotificationLog({
-                    schoolName: imported.nama,
-                    npsn: imported.npsn,
-                    type: "verifikasi",
-                    message: `[Update Massal] Status verifikasi diperbarui otomatis dari file sinkronisasi CSV.`,
-                    oldValue: oldSchool.statusVerifikasi,
-                    newValue: imported.statusVerifikasi
-                  });
-                }
-              }
+              fetch("/api/notifications", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(newNotif)
+              }).then(() => fetchAllData());
             } else {
-              // Add as new school
-              addedCount++;
-              const nextNo = updatedList.length > 0 ? Math.max(...updatedList.map((s) => s.no)) + 1 : 1;
-              updatedList.push({
-                ...imported,
-                no: nextNo
-              });
+              addToast(
+                "Sinkronisasi Gabung Selesai",
+                `Sinkronisasi massal berhasil memproses penggabungan data CSV.`,
+                "success"
+              );
 
-              addNotificationLog({
-                schoolName: imported.nama,
-                npsn: imported.npsn,
-                type: "import",
-                message: `[Lembaga Baru] Didaftarkan otomatis melalui penggabungan file CSV.`
-              });
+              const newNotif = {
+                id: `notif-${Date.now()}`,
+                timestamp: timestampString,
+                schoolName: "Sistem Sinkronisasi",
+                npsn: "CSV_BULK",
+                type: "import" as const,
+                message: `Sinkronisasi massal berhasil memproses penggabungan data CSV dengan database aktif.`,
+                isRead: false
+              };
+
+              fetch("/api/notifications", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(newNotif)
+              }).then(() => fetchAllData());
             }
-          });
+          }
+        })
+        .catch((err) => console.error("Error importing schools:", err));
 
-          addToast(
-            "Sinkronisasi Gabung Selesai",
-            `Sinkronisasi massal berhasil memproses ${updatedCount} baris perubahan status dan ${addedCount} lembaga baru.`,
-            "success"
-          );
-
-          return updatedList;
-        });
-      }
       updateTimestamp();
     },
-    [addNotificationLog, addToast, updateTimestamp]
+    [fetchAllData, addToast, updateTimestamp]
   );
 
   // Restore baseline 194 original records
@@ -405,29 +460,43 @@ export default function App() {
         "Apakah Anda yakin ingin menyetel ulang seluruh database ke 194 data sekolah awal dari PDF rekap?"
       )
     ) {
-      setSchools(initialSchools);
-      setNotifications((prev) => {
-        const timestampString = new Date().toLocaleString("id-ID", {
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-          hour: "2-digit",
-          minute: "2-digit"
-        });
-        return [
-          {
-            id: `reset-${Date.now()}`,
-            timestamp: timestampString,
-            schoolName: "Sistem GTK",
-            npsn: "SYSTEM",
-            type: "sistem",
-            message: "Seluruh database sekolah di-reset paksa ke baseline rekap asli (194 Sekolah).",
-            isRead: false
-          },
-          ...prev
-        ];
-      });
-      addToast("Database Disetel Ulang", "Database berhasil dikembalikan ke 194 sekolah asli.", "info");
+      fetch("/api/schools/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      })
+        .then((res) => res.json())
+        .then((result) => {
+          if (result.success) {
+            setSchools(result.schools);
+            addToast("Database Disetel Ulang", "Database berhasil dikembalikan ke 194 sekolah asli.", "info");
+
+            const timestampString = new Date().toLocaleString("id-ID", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit"
+            });
+
+            const newNotif = {
+              id: `reset-${Date.now()}`,
+              timestamp: timestampString,
+              schoolName: "Sistem GTK",
+              npsn: "SYSTEM",
+              type: "sistem" as const,
+              message: "Seluruh database sekolah di-reset paksa ke baseline rekap asli (194 Sekolah).",
+              isRead: false
+            };
+
+            fetch("/api/notifications", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(newNotif)
+            }).then(() => fetchAllData());
+          }
+        })
+        .catch((err) => console.error("Error resetting database:", err));
+
       updateTimestamp();
     }
   };
@@ -447,15 +516,39 @@ export default function App() {
   // --- NOTIFICATION MANIPULATION ---
   const handleMarkAllNotificationsAsRead = () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+
+    fetch("/api/notifications/mark-read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    })
+      .then(() => fetchAllData())
+      .catch((err) => console.error(err));
+
     addToast("Notifikasi Dibaca", "Semua log notifikasi ditandai sebagai terbaca.", "success");
   };
 
   const handleMarkNotificationAsRead = (id: string) => {
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+
+    fetch("/api/notifications/mark-read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id })
+    })
+      .then(() => fetchAllData())
+      .catch((err) => console.error(err));
   };
 
   const handleClearAllNotifications = () => {
     setNotifications([]);
+
+    fetch("/api/notifications/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    })
+      .then(() => fetchAllData())
+      .catch((err) => console.error(err));
+
     addToast("Log Dibersihkan", "Seluruh riwayat notifikasi telah dikosongkan.", "info");
   };
 
@@ -526,10 +619,8 @@ export default function App() {
                                 <button
                                   key={p}
                                   onClick={() => {
-                                    setPeriode(p);
-                                    setTempPeriod(p);
+                                    handleUpdatePeriod(p);
                                     setIsEditingPeriod(false);
-                                    addToast("Periode Diubah", `Periode usulan TPG berhasil diubah ke ${p}.`, "success");
                                   }}
                                   className={`py-1 px-1.5 rounded text-[10px] font-bold text-left transition border cursor-pointer ${
                                     periode === p
@@ -556,9 +647,8 @@ export default function App() {
                                 <button
                                   onClick={() => {
                                     if (tempPeriod.trim()) {
-                                      setPeriode(tempPeriod.trim());
+                                      handleUpdatePeriod(tempPeriod.trim());
                                       setIsEditingPeriod(false);
-                                      addToast("Periode Diubah", `Periode usulan TPG berhasil diubah ke ${tempPeriod.trim()}.`, "success");
                                     }
                                   }}
                                   className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-2 py-1 rounded text-[10px] transition cursor-pointer"
