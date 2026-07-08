@@ -16,9 +16,10 @@ interface ImportDataProps {
   onImportComplete: (imported: Omit<School, "no">[], mode: "merge" | "overwrite") => void;
   existingSchools: School[];
   isAdmin?: boolean;
+  onSetAdmin?: (isAdmin: boolean) => void;
 }
 
-export default function ImportData({ onImportComplete, existingSchools, isAdmin = false }: ImportDataProps) {
+export default function ImportData({ onImportComplete, existingSchools, isAdmin = false, onSetAdmin }: ImportDataProps) {
   const [dragActive, setDragActive] = useState(false);
   const [fileName, setFileName] = useState("");
   const [parsedData, setParsedData] = useState<Omit<School, "no">[]>([]);
@@ -101,10 +102,15 @@ export default function ImportData({ onImportComplete, existingSchools, isAdmin 
 
     reader.onload = (e) => {
       try {
-        const text = e.target?.result as string;
+        let text = e.target?.result as string;
         if (!text) {
           setErrorMessage("File kosong atau rusak.");
           return;
+        }
+
+        // Remove UTF-8 Byte Order Mark (BOM) if present
+        if (text.charCodeAt(0) === 0xFEFF) {
+          text = text.slice(1);
         }
 
         const lines = text.split(/\r?\n/);
@@ -113,45 +119,75 @@ export default function ImportData({ onImportComplete, existingSchools, isAdmin 
           return;
         }
 
-        // Auto-detect delimiter: comma vs semicolon
-        const firstLine = lines[0] || "";
+        // Auto-detect delimiter: comma vs semicolon vs tab
+        let firstLine = lines[0] || "";
         const commaCount = (firstLine.match(/,/g) || []).length;
         const semicolonCount = (firstLine.match(/;/g) || []).length;
-        const delimiter = semicolonCount > commaCount ? ";" : ",";
+        const tabCount = (firstLine.match(/\t/g) || []).length;
+        
+        let delimiter = ",";
+        if (semicolonCount > commaCount && semicolonCount > tabCount) {
+          delimiter = ";";
+        } else if (tabCount > commaCount && tabCount > semicolonCount) {
+          delimiter = "\t";
+        }
 
         // Parse CSV headers (lowercased & cleaned)
         const rawHeaders = firstLine.split(delimiter).map((h) => h.replace(/^["']|["']$/g, "").trim().toLowerCase());
         
         // Find indexes for NPSN, Nama Sekolah, Status Upload, Status Verifikasi
         let npsnIdx = rawHeaders.findIndex((h) => h.includes("npsn"));
-        let namaIdx = rawHeaders.findIndex((h) => h.includes("nama") || h.includes("sekolah") || h.includes("lembaga"));
+        let namaIdx = rawHeaders.findIndex((h) => h.includes("nama") || h.includes("sekolah") || h.includes("lembaga") || h.includes("nama_sekolah") || h.includes("nama sekolah"));
         let uploadIdx = rawHeaders.findIndex((h) => 
           h.includes("upload") || 
           h.includes("unggah") || 
           h.includes("berkas") || 
           h.includes("dokumen") ||
-          h.includes("tpg") ||
-          h.includes("kirim")
+          h.includes("sptjm") ||
+          h.includes("file") ||
+          h.includes("upload_berkas") ||
+          h.includes("status_upload")
         );
         let verifikasiIdx = rawHeaders.findIndex((h) => 
           h.includes("verifikasi") || 
-          h.includes("status verifikasi") || 
           h.includes("verif") || 
           h.includes("setuju") || 
           h.includes("acc") ||
-          h.includes("status")
+          h.includes("valid") ||
+          h.includes("keterangan") ||
+          h.includes("ket") ||
+          h.includes("status_verifikasi")
         );
 
-        // Fallback checks if header name matching failed but we have at least 4 columns
-        if (rawHeaders.length >= 4) {
+        // If uploadIdx is still -1, search for other common terms
+        if (uploadIdx === -1) {
+          uploadIdx = rawHeaders.findIndex((h) => h.includes("tpg") || h.includes("kirim"));
+        }
+        // If verifikasiIdx is still -1, look for generic status column (excluding matched upload column)
+        if (verifikasiIdx === -1) {
+          verifikasiIdx = rawHeaders.findIndex((h, idx) => idx !== uploadIdx && h.includes("status"));
+        }
+
+        // Robust fallbacks if header index matching failed
+        if (rawHeaders.length >= 2) {
           if (npsnIdx === -1) npsnIdx = 0;
-          if (namaIdx === -1) namaIdx = 1;
-          if (uploadIdx === -1) uploadIdx = 2;
-          if (verifikasiIdx === -1) verifikasiIdx = 3;
+          if (namaIdx === -1) {
+            namaIdx = npsnIdx === 0 ? 1 : 0;
+          }
+        }
+        if (rawHeaders.length >= 4) {
+          if (uploadIdx === -1) {
+            // Find an unused index for upload
+            uploadIdx = [0, 1, 2, 3].find((i) => i !== npsnIdx && i !== namaIdx) ?? 2;
+          }
+          if (verifikasiIdx === -1) {
+            // Find the remaining unused index for verification
+            verifikasiIdx = [0, 1, 2, 3].find((i) => i !== npsnIdx && i !== namaIdx && i !== uploadIdx) ?? 3;
+          }
         }
 
         if (npsnIdx === -1 || namaIdx === -1) {
-          setErrorMessage("Header kolom 'NPSN' dan 'Nama Sekolah' tidak ditemukan. Pastikan baris pertama berisi nama kolom.");
+          setErrorMessage("Kolom 'NPSN' dan 'Nama Sekolah' tidak terdeteksi. Pastikan file CSV memiliki baris header.");
           return;
         }
 
@@ -303,13 +339,45 @@ export default function ImportData({ onImportComplete, existingSchools, isAdmin 
           </div>
         </div>
       ) : (
-        <div className="lg:col-span-3 bg-amber-50/60 border border-amber-100 rounded-2xl p-4 flex items-center gap-3 text-xs text-amber-800 shadow-xs">
-          <Lock size={16} className="text-amber-600 shrink-0" />
-          <div>
-            <p className="font-bold">Mode Pemantauan Terbatas (Read-Only)</p>
-            <p className="mt-0.5 text-slate-600 font-medium">
-              Halaman sinkronisasi CSV saat ini dinonaktifkan untuk publik. Anda tetap dapat mengunduh templat, mengunggah file untuk menguji dan mempratinjau data sekolah, namun tombol penulisan / penyimpanan ke database dinonaktifkan.
-            </p>
+        <div className="lg:col-span-3 bg-amber-50/60 border border-amber-100 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs text-amber-800 shadow-xs animate-fadeIn">
+          <div className="flex items-start gap-3">
+            <Lock size={16} className="text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-amber-950">Mode Pemantauan Terbatas (Read-Only)</p>
+              <p className="mt-0.5 text-slate-600 font-medium leading-relaxed">
+                Halaman sinkronisasi CSV saat ini dinonaktifkan untuk publik. Anda dapat mempratinjau data sekolah dari CSV di sini. Untuk mengaktifkan penyimpanan data ke database, silakan masukkan Passcode Administrator.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0 self-end md:self-auto">
+            <input
+              type="password"
+              placeholder="Passcode Admin..."
+              className="px-2.5 py-1.5 border border-amber-200 bg-white rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500 w-36 text-slate-700 font-mono"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const val = (e.target as HTMLInputElement).value;
+                  if (val.trim() === "ginginfaujiyanti") {
+                    onSetAdmin?.(true);
+                  } else {
+                    alert("Passcode salah! Silakan coba lagi.");
+                  }
+                }
+              }}
+            />
+            <button
+              onClick={(e) => {
+                const input = (e.currentTarget.previousSibling as HTMLInputElement);
+                if (input && input.value.trim() === "ginginfaujiyanti") {
+                  onSetAdmin?.(true);
+                } else {
+                  alert("Passcode salah! Silakan coba lagi.");
+                }
+              }}
+              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-[11px] transition cursor-pointer"
+            >
+              Buka Akses
+            </button>
           </div>
         </div>
       )}
@@ -443,20 +511,55 @@ export default function ImportData({ onImportComplete, existingSchools, isAdmin 
           isAdmin ? (
             <button
               onClick={handleApplyImport}
-              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition cursor-pointer flex items-center justify-center gap-2"
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition cursor-pointer flex items-center justify-center gap-2 animate-pulse"
             >
               Terapkan Sinkronisasi Data
               <ArrowRight size={14} />
             </button>
           ) : (
-            <button
-              disabled
-              className="w-full py-2.5 bg-slate-100 border border-slate-200 text-slate-400 rounded-xl text-xs font-bold transition cursor-not-allowed flex items-center justify-center gap-2"
-              title="Sinkronisasi dinonaktifkan (Mode Lihat Saja)"
-            >
-              <Lock size={14} className="text-slate-400" />
-              Terapkan Sinkronisasi (Mode Lihat Saja)
-            </button>
+            <div className="space-y-3 bg-slate-50 p-3.5 border border-slate-200 rounded-xl">
+              <button
+                disabled
+                className="w-full py-2.5 bg-slate-200 border border-slate-300 text-slate-400 rounded-xl text-xs font-bold transition cursor-not-allowed flex items-center justify-center gap-2"
+                title="Sinkronisasi dinonaktifkan (Mode Lihat Saja)"
+              >
+                <Lock size={14} className="text-slate-400" />
+                Terapkan Sinkronisasi (Mode Lihat Saja)
+              </button>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 block uppercase tracking-wider">Masukkan Passcode Admin untuk Menyimpan:</label>
+                <div className="flex gap-1.5">
+                  <input
+                    type="password"
+                    placeholder="Masukkan Passcode..."
+                    className="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-slate-700 font-mono"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const val = (e.target as HTMLInputElement).value;
+                        if (val.trim() === "ginginfaujiyanti") {
+                          onSetAdmin?.(true);
+                        } else {
+                          alert("Passcode salah! Silakan coba lagi.");
+                        }
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={(e) => {
+                      const input = (e.currentTarget.previousSibling as HTMLInputElement);
+                      if (input && input.value.trim() === "ginginfaujiyanti") {
+                        onSetAdmin?.(true);
+                      } else {
+                        alert("Passcode salah! Silakan coba lagi.");
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs transition cursor-pointer shrink-0"
+                  >
+                    Buka
+                  </button>
+                </div>
+              </div>
+            </div>
           )
         )}
       </div>

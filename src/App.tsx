@@ -958,7 +958,12 @@ export default function App() {
             )}
 
             {activeTab === "import" && (
-              <ImportData onImportComplete={handleImportSchools} existingSchools={schools} isAdmin={isAdmin} />
+              <ImportData
+                onImportComplete={handleImportSchools}
+                existingSchools={schools}
+                isAdmin={isAdmin}
+                onSetAdmin={setIsAdmin}
+              />
             )}
 
             {activeTab === "notifications" && (
