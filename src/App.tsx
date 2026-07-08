@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { School, initialSchools, NotificationLog } from "./data/schoolsData";
+import { School, initialSchools, NotificationLog, getJenjang, getKabKota } from "./data/schoolsData";
 import DashboardOverview from "./components/DashboardOverview";
 import SchoolTable from "./components/SchoolTable";
 import ImportData from "./components/ImportData";
@@ -30,16 +30,62 @@ interface Toast {
 }
 
 export default function App() {
-  // --- STATE ---
-  const [schools, setSchools] = useState<School[]>([]);
-  const [notifications, setNotifications] = useState<NotificationLog[]>([]);
+  // --- STATE WITH LOCALSTORAGE PERSISTENCE FALLBACKS (For Netlify Static Deployments) ---
+  const [schools, setSchools] = useState<School[]>(() => {
+    const saved = localStorage.getItem("diba_gtk_schools");
+    return saved ? JSON.parse(saved) : initialSchools;
+  });
+
+  const [notifications, setNotifications] = useState<NotificationLog[]>(() => {
+    const saved = localStorage.getItem("diba_gtk_notifications");
+    if (saved) return JSON.parse(saved);
+
+    const initDate = new Date().toLocaleString("id-ID", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    }) + " WIB";
+
+    return [
+      {
+        id: "init-1",
+        timestamp: initDate,
+        schoolName: "Sistem DIBA GTK",
+        npsn: "SYSTEM",
+        type: "sistem",
+        message: "Database awal berhasil dimuat seutuhnya dari file rekap. 194 Lembaga Sekolah berhasil dipetakan ke sistem.",
+        isRead: false
+      },
+      {
+        id: "init-2",
+        timestamp: initDate,
+        schoolName: "Penyaringan Wilayah",
+        npsn: "WILAYAH",
+        type: "sistem",
+        message: "Sistem mendeteksi 3 area administratif aktif: Kabupaten Ciamis, Kota Banjar, dan Kabupaten Pangandaran.",
+        isRead: true
+      }
+    ];
+  });
+
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [activeTab, setActiveTab] = useState<"overview" | "schools" | "import" | "notifications" | "settings">("overview");
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [showNotificationPopup, setShowNotificationPopup] = useState(false);
-  const [periode, setPeriode] = useState<string>("Juli 2026");
+  
+  const [periode, setPeriode] = useState<string>(() => {
+    return localStorage.getItem("diba_gtk_periode") || "Juli 2026";
+  });
+
   const [isEditingPeriod, setIsEditingPeriod] = useState(false);
-  const [tempPeriod, setTempPeriod] = useState("Juli 2026");
+  const [tempPeriod, setTempPeriod] = useState(() => {
+    return localStorage.getItem("diba_gtk_periode") || "Juli 2026";
+  });
+
+  const [isServerOnline, setIsServerOnline] = useState<boolean | null>(null);
+
   const [lastUpdated, setLastUpdated] = useState<string>(() => {
     return new Date().toLocaleString("id-ID", {
       day: "2-digit",
@@ -58,38 +104,54 @@ export default function App() {
   const [passcode, setPasscode] = useState("");
   const [passcodeError, setPasscodeError] = useState("");
 
-  // --- REAL-TIME EXPRESS BACKEND SYNCHRONIZATION ---
+  // --- REAL-TIME EXPRESS BACKEND SYNCHRONIZATION WITH GRACEFUL FALLBACK ---
   const fetchAllData = useCallback(() => {
     // Fetch schools
     fetch("/api/schools")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error("Backend offline");
+        return res.json();
+      })
       .then((data) => {
         if (Array.isArray(data)) {
           setSchools(data);
+          localStorage.setItem("diba_gtk_schools", JSON.stringify(data));
+          setIsServerOnline(true);
         }
       })
-      .catch((err) => console.error("Error fetching schools:", err));
+      .catch((err) => {
+        console.warn("Express server offline / not found. Running in client-side fallback mode (Netlify compatible).", err);
+        setIsServerOnline(false);
+      });
 
     // Fetch notifications
     fetch("/api/notifications")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error("Backend offline");
+        return res.json();
+      })
       .then((data) => {
         if (Array.isArray(data)) {
           setNotifications(data);
+          localStorage.setItem("diba_gtk_notifications", JSON.stringify(data));
         }
       })
-      .catch((err) => console.error("Error fetching notifications:", err));
+      .catch((err) => {});
 
     // Fetch period
     fetch("/api/period")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error("Backend offline");
+        return res.json();
+      })
       .then((data) => {
         if (data && data.period) {
           setPeriode(data.period);
           setTempPeriod(data.period);
+          localStorage.setItem("diba_gtk_periode", data.period);
         }
       })
-      .catch((err) => console.error("Error fetching period:", err));
+      .catch((err) => {});
   }, []);
 
   // Sync admin mode preference
@@ -154,16 +216,19 @@ export default function App() {
   const handleUpdatePeriod = useCallback((p: string) => {
     setPeriode(p);
     setTempPeriod(p);
+    localStorage.setItem("diba_gtk_periode", p);
+    addToast("Periode Diubah", `Periode usulan TPG berhasil diubah ke ${p}.`, "success");
+
     fetch("/api/period", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ period: p })
     })
-      .then(() => {
-        addToast("Periode Diubah", `Periode usulan TPG berhasil diubah ke ${p}.`, "success");
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed server sync");
         fetchAllData();
       })
-      .catch((err) => console.error("Error setting period:", err));
+      .catch((err) => console.log("Server period update offline (using local storage):", err));
   }, [fetchAllData, addToast]);
 
   // --- DATA MUTATORS ---
@@ -215,19 +280,22 @@ export default function App() {
         );
       }
 
-      // Optimistically update local state
-      setSchools((prev) =>
-        prev.map((s) => (s.npsn === npsn ? { ...s, ...fields } : s))
-      );
+      // 1. Optimistically update local state & localStorage (Netlify fallback)
+      const updatedSchools = schools.map((s) => (s.npsn === npsn ? { ...s, ...fields } : s));
+      setSchools(updatedSchools);
+      localStorage.setItem("diba_gtk_schools", JSON.stringify(updatedSchools));
 
-      // Save to server
+      // 2. Save to server
       fetch("/api/schools/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ npsn, updates: fields })
       })
-        .then(() => fetchAllData())
-        .catch((err) => console.error("Error updating school:", err));
+        .then((res) => {
+          if (!res.ok) throw new Error("Failed server sync");
+          fetchAllData();
+        })
+        .catch((err) => console.log("Server school update offline (using local storage):", err));
 
       if (notificationMessage) {
         const timestampString = new Date().toLocaleString("id-ID", {
@@ -239,7 +307,7 @@ export default function App() {
           second: "2-digit"
         });
 
-        const newNotif = {
+        const newNotif: NotificationLog = {
           id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           timestamp: timestampString,
           schoolName: school.nama,
@@ -251,81 +319,115 @@ export default function App() {
           isRead: false
         };
 
-        // Optimistically add notification
-        setNotifications((prev) => [newNotif, ...prev]);
+        // Update notifications locally & localStorage
+        const updatedNotifications = [newNotif, ...notifications];
+        setNotifications(updatedNotifications);
+        localStorage.setItem("diba_gtk_notifications", JSON.stringify(updatedNotifications));
 
         fetch("/api/notifications", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(newNotif)
         })
-          .then(() => fetchAllData())
-          .catch((err) => console.error("Error creating notification:", err));
+          .then((res) => {
+            if (!res.ok) throw new Error("Failed server sync");
+            fetchAllData();
+          })
+          .catch((err) => console.log("Server notification add offline (using local storage):", err));
       }
 
       updateTimestamp();
     },
-    [schools, fetchAllData, addToast, updateTimestamp]
+    [schools, notifications, fetchAllData, addToast, updateTimestamp]
   );
 
   // Manually add school
   const handleAddSchool = useCallback(
     (newSchool: Omit<School, "no">) => {
+      // Check for duplicates locally
+      if (schools.some((s) => s.npsn === newSchool.npsn)) {
+        addToast("NPSN Terdaftar", `Sekolah dengan NPSN ${newSchool.npsn} sudah terdaftar di database.`, "warning");
+        return;
+      }
+
+      const nextNo = schools.length > 0 ? Math.max(...schools.map((s) => s.no)) + 1 : 1;
+      const schoolWithNo: School = {
+        ...newSchool,
+        no: nextNo,
+        nama: newSchool.nama.toUpperCase(),
+        jenjang: newSchool.jenjang || getJenjang(newSchool.nama),
+        kabKota: newSchool.kabKota || getKabKota(newSchool.nama),
+        statusUpload: newSchool.statusUpload || "BELUM",
+        statusVerifikasi: newSchool.statusVerifikasi || "BELUM"
+      };
+
+      // 1. Update local state & localStorage (Netlify fallback)
+      const updatedSchools = [...schools, schoolWithNo];
+      setSchools(updatedSchools);
+      localStorage.setItem("diba_gtk_schools", JSON.stringify(updatedSchools));
+
+      addToast(
+        "Lembaga Ditambahkan",
+        `${schoolWithNo.nama} berhasil didaftarkan di wilayah ${schoolWithNo.kabKota}.`,
+        "success"
+      );
+
+      const timestampString = new Date().toLocaleString("id-ID", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+
+      const newNotif: NotificationLog = {
+        id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        timestamp: timestampString,
+        schoolName: schoolWithNo.nama,
+        npsn: schoolWithNo.npsn,
+        type: "sistem",
+        message: `Sekolah baru berhasil ditambahkan secara manual ke database usulan.`,
+        isRead: false
+      };
+
+      // Update notifications locally
+      const updatedNotifications = [newNotif, ...notifications];
+      setNotifications(updatedNotifications);
+      localStorage.setItem("diba_gtk_notifications", JSON.stringify(updatedNotifications));
+
+      // 2. Try to sync with server
       fetch("/api/schools/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newSchool)
       })
         .then((res) => {
-          if (!res.ok) {
-            return res.json().then((err) => {
-              throw new Error(err.error || "Gagal menambahkan sekolah.");
-            });
-          }
+          if (!res.ok) throw new Error("Failed server sync");
           return res.json();
         })
         .then((result) => {
           if (result.success) {
-            const addedSchool = result.school;
-            addToast(
-              "Lembaga Ditambahkan",
-              `${addedSchool.nama} berhasil didaftarkan di wilayah ${addedSchool.kabKota}.`,
-              "success"
-            );
-
-            const timestampString = new Date().toLocaleString("id-ID", {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit"
-            });
-
-            const newNotif = {
-              id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-              timestamp: timestampString,
-              schoolName: addedSchool.nama,
-              npsn: addedSchool.npsn,
-              type: "sistem" as const,
-              message: `Sekolah baru berhasil ditambahkan secara manual ke database usulan.`,
-              isRead: false
-            };
-
-            fetch("/api/notifications", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(newNotif)
-            }).then(() => fetchAllData());
+            fetchAllData();
           }
         })
-        .catch((err: any) => {
-          addToast("Gagal Menambahkan", err.message, "warning");
-        });
+        .catch((err) => console.log("Server add school offline (using local storage):", err));
+
+      // Sync notification to server
+      fetch("/api/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newNotif)
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error("Failed server sync");
+          fetchAllData();
+        })
+        .catch((err) => console.log("Server notification add offline (using local storage):", err));
 
       updateTimestamp();
     },
-    [fetchAllData, addToast, updateTimestamp]
+    [schools, notifications, fetchAllData, addToast, updateTimestamp]
   );
 
   // Manually delete school
@@ -334,123 +436,186 @@ export default function App() {
       const school = schools.find((s) => s.npsn === npsn);
       if (!school) return;
 
-      // Optimistic delete
-      setSchools((prev) => prev.filter((s) => s.npsn !== npsn));
+      // 1. Update local state & localStorage immediately (Netlify fallback)
+      const filtered = schools.filter((s) => s.npsn !== npsn);
+      const renumbered = filtered.map((s, idx) => ({ ...s, no: idx + 1 }));
+      setSchools(renumbered);
+      localStorage.setItem("diba_gtk_schools", JSON.stringify(renumbered));
 
+      addToast("Lembaga Dihapus", `${school.nama} telah dikeluarkan dari pemantauan.`, "warning");
+
+      const timestampString = new Date().toLocaleString("id-ID", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+
+      const newNotif: NotificationLog = {
+        id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        timestamp: timestampString,
+        schoolName: school.nama,
+        npsn: school.npsn,
+        type: "sistem",
+        message: `Lembaga sekolah dihapus seutuhnya dari database pengusul TPG.`,
+        isRead: false
+      };
+
+      // Update notifications locally
+      const updatedNotifications = [newNotif, ...notifications];
+      setNotifications(updatedNotifications);
+      localStorage.setItem("diba_gtk_notifications", JSON.stringify(updatedNotifications));
+
+      // 2. Try server sync
       fetch("/api/schools/delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ npsn })
       })
-        .then(() => {
-          addToast("Lembaga Dihapus", `${school.nama} telah dikeluarkan dari pemantauan.`, "warning");
-
-          const timestampString = new Date().toLocaleString("id-ID", {
-            day: "numeric",
-            month: "short",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit"
-          });
-
-          const newNotif = {
-            id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-            timestamp: timestampString,
-            schoolName: school.nama,
-            npsn: school.npsn,
-            type: "sistem" as const,
-            message: `Lembaga sekolah dihapus seutuhnya dari database pengusul TPG.`,
-            isRead: false
-          };
-
-          fetch("/api/notifications", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(newNotif)
-          }).then(() => fetchAllData());
+        .then((res) => {
+          if (!res.ok) throw new Error("Failed server sync");
+          fetchAllData();
         })
-        .catch((err) => console.error("Error deleting school:", err));
+        .catch((err) => console.log("Server delete school offline (using local storage):", err));
+
+      fetch("/api/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newNotif)
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error("Failed server sync");
+          fetchAllData();
+        })
+        .catch((err) => console.log("Server notification add offline (using local storage):", err));
 
       updateTimestamp();
     },
-    [schools, fetchAllData, addToast, updateTimestamp]
+    [schools, notifications, fetchAllData, addToast, updateTimestamp]
   );
 
   // Bulk CSV Imports Handler
   const handleImportSchools = useCallback(
     (importedList: Omit<School, "no">[], mode: "merge" | "overwrite") => {
+      // 1. Process and compute schools list in client immediately (Netlify compatibility)
+      let nextSchools: School[] = [];
+      const timestampString = new Date().toLocaleString("id-ID", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+
+      let notifMessage = "";
+
+      if (mode === "overwrite") {
+        nextSchools = importedList.map((item, index) => ({
+          no: index + 1,
+          npsn: item.npsn,
+          nama: item.nama.toUpperCase(),
+          jenjang: item.jenjang || getJenjang(item.nama),
+          kabKota: item.kabKota || getKabKota(item.nama),
+          statusUpload: item.statusUpload || "BELUM",
+          statusVerifikasi: item.statusVerifikasi || "BELUM"
+        }));
+
+        addToast(
+          "Database Ditimpa",
+          `Berhasil memuat seutuhnya ${importedList.length} sekolah baru dari file eksternal.`,
+          "success"
+        );
+        notifMessage = `Penggantian massal sukses! Seluruh database ditimpa dengan ${importedList.length} data baru dari CSV.`;
+      } else {
+        // MERGE MODE
+        nextSchools = [...schools];
+        importedList.forEach((item) => {
+          const existingIdx = nextSchools.findIndex((s) => s.npsn === item.npsn);
+          if (existingIdx !== -1) {
+            nextSchools[existingIdx] = {
+              ...nextSchools[existingIdx],
+              ...item,
+              nama: item.nama ? item.nama.toUpperCase() : nextSchools[existingIdx].nama,
+              jenjang: item.nama ? getJenjang(item.nama) : nextSchools[existingIdx].jenjang,
+              kabKota: item.nama ? getKabKota(item.nama) : nextSchools[existingIdx].kabKota
+            };
+          } else {
+            const maxNo = nextSchools.reduce((max, s) => (s.no > max ? s.no : max), 0);
+            nextSchools.push({
+              no: maxNo + 1,
+              npsn: item.npsn,
+              nama: item.nama.toUpperCase(),
+              jenjang: getJenjang(item.nama),
+              kabKota: getKabKota(item.nama),
+              statusUpload: item.statusUpload || "BELUM",
+              statusVerifikasi: item.statusVerifikasi || "BELUM"
+            });
+          }
+        });
+
+        // Re-number
+        nextSchools = nextSchools.map((s, idx) => ({ ...s, no: idx + 1 }));
+
+        addToast(
+          "Sinkronisasi Gabung Selesai",
+          `Sinkronisasi massal berhasil memproses penggabungan data CSV.`,
+          "success"
+        );
+        notifMessage = `Sinkronisasi massal berhasil memproses penggabungan data CSV dengan database aktif.`;
+      }
+
+      // Apply locally first to keep client operational offline/static
+      setSchools(nextSchools);
+      localStorage.setItem("diba_gtk_schools", JSON.stringify(nextSchools));
+
+      const newNotif: NotificationLog = {
+        id: `notif-${Date.now()}`,
+        timestamp: timestampString,
+        schoolName: "Sistem Sinkronisasi",
+        npsn: "CSV_BULK",
+        type: "import",
+        message: notifMessage,
+        isRead: false
+      };
+
+      const updatedNotifications = [newNotif, ...notifications];
+      setNotifications(updatedNotifications);
+      localStorage.setItem("diba_gtk_notifications", JSON.stringify(updatedNotifications));
+
+      // 2. Try server sync
       fetch("/api/schools/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imported: importedList, mode })
       })
-        .then((res) => res.json())
+        .then((res) => {
+          if (!res.ok) throw new Error("Failed server sync");
+          return res.json();
+        })
         .then((result) => {
           if (result.success) {
-            setSchools(result.schools);
-
-            const timestampString = new Date().toLocaleString("id-ID", {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit"
-            });
-
-            if (mode === "overwrite") {
-              addToast(
-                "Database Ditimpa",
-                `Berhasil memuat seutuhnya ${importedList.length} sekolah baru dari file eksternal.`,
-                "success"
-              );
-
-              const newNotif = {
-                id: `notif-${Date.now()}`,
-                timestamp: timestampString,
-                schoolName: "Sistem Sinkronisasi",
-                npsn: "CSV_BULK",
-                type: "import" as const,
-                message: `Penggantian massal sukses! Seluruh database ditimpa dengan ${importedList.length} data baru dari CSV.`,
-                isRead: false
-              };
-
-              fetch("/api/notifications", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(newNotif)
-              }).then(() => fetchAllData());
-            } else {
-              addToast(
-                "Sinkronisasi Gabung Selesai",
-                `Sinkronisasi massal berhasil memproses penggabungan data CSV.`,
-                "success"
-              );
-
-              const newNotif = {
-                id: `notif-${Date.now()}`,
-                timestamp: timestampString,
-                schoolName: "Sistem Sinkronisasi",
-                npsn: "CSV_BULK",
-                type: "import" as const,
-                message: `Sinkronisasi massal berhasil memproses penggabungan data CSV dengan database aktif.`,
-                isRead: false
-              };
-
-              fetch("/api/notifications", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(newNotif)
-              }).then(() => fetchAllData());
-            }
+            fetchAllData();
           }
         })
-        .catch((err) => console.error("Error importing schools:", err));
+        .catch((err) => console.log("Server CSV Import offline (using local storage):", err));
+
+      fetch("/api/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newNotif)
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error("Failed server sync");
+          fetchAllData();
+        })
+        .catch((err) => console.log("Server notification add offline (using local storage):", err));
 
       updateTimestamp();
     },
-    [fetchAllData, addToast, updateTimestamp]
+    [schools, notifications, fetchAllData, addToast, updateTimestamp]
   );
 
   // Restore baseline 194 original records
@@ -460,42 +625,60 @@ export default function App() {
         "Apakah Anda yakin ingin menyetel ulang seluruh database ke 194 data sekolah awal dari PDF rekap?"
       )
     ) {
+      // 1. Reset local state immediately (Netlify fallback)
+      setSchools(initialSchools);
+      localStorage.setItem("diba_gtk_schools", JSON.stringify(initialSchools));
+
+      addToast("Database Disetel Ulang", "Database berhasil dikembalikan ke 194 sekolah asli.", "info");
+
+      const timestampString = new Date().toLocaleString("id-ID", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+
+      const newNotif: NotificationLog = {
+        id: `reset-${Date.now()}`,
+        timestamp: timestampString,
+        schoolName: "Sistem GTK",
+        npsn: "SYSTEM",
+        type: "sistem",
+        message: "Seluruh database sekolah di-reset paksa ke baseline rekap asli (194 Sekolah).",
+        isRead: false
+      };
+
+      const updatedNotifications = [newNotif, ...notifications];
+      setNotifications(updatedNotifications);
+      localStorage.setItem("diba_gtk_notifications", JSON.stringify(updatedNotifications));
+
+      // 2. Server sync
       fetch("/api/schools/reset", {
         method: "POST",
         headers: { "Content-Type": "application/json" }
       })
-        .then((res) => res.json())
+        .then((res) => {
+          if (!res.ok) throw new Error("Failed server sync");
+          return res.json();
+        })
         .then((result) => {
           if (result.success) {
-            setSchools(result.schools);
-            addToast("Database Disetel Ulang", "Database berhasil dikembalikan ke 194 sekolah asli.", "info");
-
-            const timestampString = new Date().toLocaleString("id-ID", {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit"
-            });
-
-            const newNotif = {
-              id: `reset-${Date.now()}`,
-              timestamp: timestampString,
-              schoolName: "Sistem GTK",
-              npsn: "SYSTEM",
-              type: "sistem" as const,
-              message: "Seluruh database sekolah di-reset paksa ke baseline rekap asli (194 Sekolah).",
-              isRead: false
-            };
-
-            fetch("/api/notifications", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(newNotif)
-            }).then(() => fetchAllData());
+            fetchAllData();
           }
         })
-        .catch((err) => console.error("Error resetting database:", err));
+        .catch((err) => console.log("Server reset offline (using local storage):", err));
+
+      fetch("/api/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newNotif)
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error("Failed server sync");
+          fetchAllData();
+        })
+        .catch((err) => console.log("Server notification add offline (using local storage):", err));
 
       updateTimestamp();
     }
@@ -515,39 +698,53 @@ export default function App() {
 
   // --- NOTIFICATION MANIPULATION ---
   const handleMarkAllNotificationsAsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    const updated = notifications.map((n) => ({ ...n, isRead: true }));
+    setNotifications(updated);
+    localStorage.setItem("diba_gtk_notifications", JSON.stringify(updated));
 
     fetch("/api/notifications/mark-read", {
       method: "POST",
       headers: { "Content-Type": "application/json" }
     })
-      .then(() => fetchAllData())
-      .catch((err) => console.error(err));
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed server sync");
+        fetchAllData();
+      })
+      .catch((err) => console.log("Server mark-read offline (using local storage):", err));
 
     addToast("Notifikasi Dibaca", "Semua log notifikasi ditandai sebagai terbaca.", "success");
   };
 
   const handleMarkNotificationAsRead = (id: string) => {
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+    const updated = notifications.map((n) => (n.id === id ? { ...n, isRead: true } : n));
+    setNotifications(updated);
+    localStorage.setItem("diba_gtk_notifications", JSON.stringify(updated));
 
     fetch("/api/notifications/mark-read", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id })
     })
-      .then(() => fetchAllData())
-      .catch((err) => console.error(err));
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed server sync");
+        fetchAllData();
+      })
+      .catch((err) => console.log("Server notification read offline (using local storage):", err));
   };
 
   const handleClearAllNotifications = () => {
     setNotifications([]);
+    localStorage.setItem("diba_gtk_notifications", JSON.stringify([]));
 
     fetch("/api/notifications/clear", {
       method: "POST",
       headers: { "Content-Type": "application/json" }
     })
-      .then(() => fetchAllData())
-      .catch((err) => console.error(err));
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed server sync");
+        fetchAllData();
+      })
+      .catch((err) => console.log("Server notifications clear offline (using local storage):", err));
 
     addToast("Log Dibersihkan", "Seluruh riwayat notifikasi telah dikosongkan.", "info");
   };
@@ -576,6 +773,17 @@ export default function App() {
                   <span className="hidden sm:inline-flex items-center gap-1 text-[9px] font-extrabold bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full uppercase tracking-wider">
                     <Sparkles size={10} /> Live
                   </span>
+
+                  {isServerOnline !== null && (
+                    <span className={`hidden sm:inline-flex items-center gap-1.5 text-[9px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider border ${
+                      isServerOnline 
+                        ? "bg-indigo-50 text-indigo-700 border-indigo-100" 
+                        : "bg-amber-50 text-amber-800 border-amber-200"
+                    }`} title={isServerOnline ? "Tersambung ke cloud database server. Sinkronisasi multi-device aktif!" : "Berjalan di hosting statis (Netlify). Menggunakan database browser lokal."}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${isServerOnline ? "bg-indigo-600 animate-pulse" : "bg-amber-600"}`} />
+                      <span>DB: {isServerOnline ? "Cloud (Sync)" : "Browser (Lokal)"}</span>
+                    </span>
+                  )}
 
                   {/* Interactive Period Selector Badge */}
                   <div className="relative inline-block">
