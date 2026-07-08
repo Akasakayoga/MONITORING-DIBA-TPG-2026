@@ -1,0 +1,6 @@
+{
+  "name": "Dashboard DIBA GTK TPG",
+  "description": "Monitoring Usulan TPG GTK Kabupaten Ciamis, Kota Banjar, dan Kabupaten Pangandaran dengan fitur lapor, import, dan notifikasi otomatis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
