@@ -71,6 +71,17 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<"overview" | "schools" | "import" | "notifications">("overview");
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [showNotificationPopup, setShowNotificationPopup] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string>(() => {
+    const saved = localStorage.getItem("diba_gtk_last_updated");
+    if (saved) return saved;
+    return new Date().toLocaleString("id-ID", {
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    }) + " WIB";
+  });
 
   // --- LOCAL PERSISTENCE ---
   useEffect(() => {
@@ -87,6 +98,19 @@ export default function App() {
       setCurrentTime(new Date());
     }, 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  const updateTimestamp = useCallback(() => {
+    const formatted = new Date().toLocaleString("id-ID", {
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    }) + " WIB";
+    setLastUpdated(formatted);
+    localStorage.setItem("diba_gtk_last_updated", formatted);
   }, []);
 
   const formattedTime = useMemo(() => {
@@ -198,8 +222,9 @@ export default function App() {
           return { ...school, ...fields };
         });
       });
+      updateTimestamp();
     },
-    [addNotificationLog, addToast]
+    [addNotificationLog, addToast, updateTimestamp]
   );
 
   // Manually add school
@@ -227,8 +252,9 @@ export default function App() {
 
         return [...prev, schoolWithNo];
       });
+      updateTimestamp();
     },
-    [addNotificationLog, addToast]
+    [addNotificationLog, addToast, updateTimestamp]
   );
 
   // Manually delete school
@@ -249,8 +275,9 @@ export default function App() {
 
         return prev.filter((s) => s.npsn !== npsn);
       });
+      updateTimestamp();
     },
-    [addNotificationLog, addToast]
+    [addNotificationLog, addToast, updateTimestamp]
   );
 
   // Bulk CSV Imports Handler
@@ -342,8 +369,9 @@ export default function App() {
           return updatedList;
         });
       }
+      updateTimestamp();
     },
-    [addNotificationLog, addToast]
+    [addNotificationLog, addToast, updateTimestamp]
   );
 
   // Restore baseline 194 original records
@@ -376,6 +404,7 @@ export default function App() {
         ];
       });
       addToast("Database Disetel Ulang", "Database berhasil dikembalikan ke 194 sekolah asli.", "info");
+      updateTimestamp();
     }
   };
 
@@ -413,7 +442,7 @@ export default function App() {
               <div>
                 <div className="flex items-center gap-2">
                   <h1 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight">
-                    DIBA GTK TPG MONITORING
+                    DIBA GTK TPG MONITORING KCD XIII
                   </h1>
                   <span className="hidden sm:inline-flex items-center gap-1 text-[9px] font-extrabold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full uppercase tracking-wider">
                     <Sparkles size={10} /> Live
@@ -427,6 +456,12 @@ export default function App() {
 
             {/* Right Controls: Live Clock & Notification Center */}
             <div className="flex items-center gap-4">
+              {/* Last Updated Badge */}
+              <div className="hidden lg:flex flex-col text-right">
+                <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Data Update Per:</span>
+                <span className="text-[11px] font-semibold text-slate-700 font-mono bg-indigo-50/50 px-2 py-0.5 rounded border border-indigo-100/30">{lastUpdated}</span>
+              </div>
+
               {/* Ticking Clock */}
               <div className="hidden md:flex items-center gap-2 px-3.5 py-1.5 bg-slate-50 text-slate-600 rounded-xl border border-slate-100 text-[11px] font-semibold">
                 <Clock size={13} className="text-indigo-600 animate-pulse" />
@@ -666,7 +701,7 @@ export default function App() {
             transition={{ duration: 0.2 }}
             className="focus:outline-none"
           >
-            {activeTab === "overview" && <DashboardOverview schools={schools} />}
+            {activeTab === "overview" && <DashboardOverview schools={schools} lastUpdated={lastUpdated} />}
 
             {activeTab === "schools" && (
               <SchoolTable
@@ -697,7 +732,7 @@ export default function App() {
       {/* --- FOOTER CREDITS --- */}
       <footer className="bg-white border-t border-slate-100 py-6 mt-12 text-center text-xs text-slate-400 font-medium">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p>© 2026 Aplikasi DIBA GTK - Rekapitulasi Usulan TPG</p>
+          <p>© 2026 Dashboard Monitoring - Rekapitulasi Usulan TPG KCD XIII</p>
           <div className="flex gap-4">
             <span>Kab. Ciamis</span>
             <span>•</span>
