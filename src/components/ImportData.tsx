@@ -113,14 +113,42 @@ export default function ImportData({ onImportComplete, existingSchools, isAdmin 
           return;
         }
 
+        // Auto-detect delimiter: comma vs semicolon
+        const firstLine = lines[0] || "";
+        const commaCount = (firstLine.match(/,/g) || []).length;
+        const semicolonCount = (firstLine.match(/;/g) || []).length;
+        const delimiter = semicolonCount > commaCount ? ";" : ",";
+
         // Parse CSV headers (lowercased & cleaned)
-        const rawHeaders = lines[0].split(",").map((h) => h.replace(/^["']|["']$/g, "").trim().toLowerCase());
+        const rawHeaders = firstLine.split(delimiter).map((h) => h.replace(/^["']|["']$/g, "").trim().toLowerCase());
         
         // Find indexes for NPSN, Nama Sekolah, Status Upload, Status Verifikasi
-        const npsnIdx = rawHeaders.findIndex((h) => h.includes("npsn"));
-        const namaIdx = rawHeaders.findIndex((h) => h.includes("nama") || h.includes("sekolah"));
-        const uploadIdx = rawHeaders.findIndex((h) => h.includes("upload") || h.includes("berkas"));
-        const verifikasiIdx = rawHeaders.findIndex((h) => h.includes("verifikasi") || h.includes("status verifikasi"));
+        let npsnIdx = rawHeaders.findIndex((h) => h.includes("npsn"));
+        let namaIdx = rawHeaders.findIndex((h) => h.includes("nama") || h.includes("sekolah") || h.includes("lembaga"));
+        let uploadIdx = rawHeaders.findIndex((h) => 
+          h.includes("upload") || 
+          h.includes("unggah") || 
+          h.includes("berkas") || 
+          h.includes("dokumen") ||
+          h.includes("tpg") ||
+          h.includes("kirim")
+        );
+        let verifikasiIdx = rawHeaders.findIndex((h) => 
+          h.includes("verifikasi") || 
+          h.includes("status verifikasi") || 
+          h.includes("verif") || 
+          h.includes("setuju") || 
+          h.includes("acc") ||
+          h.includes("status")
+        );
+
+        // Fallback checks if header name matching failed but we have at least 4 columns
+        if (rawHeaders.length >= 4) {
+          if (npsnIdx === -1) npsnIdx = 0;
+          if (namaIdx === -1) namaIdx = 1;
+          if (uploadIdx === -1) uploadIdx = 2;
+          if (verifikasiIdx === -1) verifikasiIdx = 3;
+        }
 
         if (npsnIdx === -1 || namaIdx === -1) {
           setErrorMessage("Header kolom 'NPSN' dan 'Nama Sekolah' tidak ditemukan. Pastikan baris pertama berisi nama kolom.");
@@ -133,7 +161,7 @@ export default function ImportData({ onImportComplete, existingSchools, isAdmin 
           const line = lines[i].trim();
           if (!line) continue; // Skip empty rows
 
-          // Simple CSV parser that handles quotes
+          // Simple CSV parser that handles quotes and the detected delimiter
           const columns: string[] = [];
           let currentField = "";
           let insideQuotes = false;
@@ -142,7 +170,7 @@ export default function ImportData({ onImportComplete, existingSchools, isAdmin 
             const char = line[charIdx];
             if (char === '"' || char === "'") {
               insideQuotes = !insideQuotes;
-            } else if (char === "," && !insideQuotes) {
+            } else if (char === delimiter && !insideQuotes) {
               columns.push(currentField.trim());
               currentField = "";
             } else {
@@ -159,18 +187,39 @@ export default function ImportData({ onImportComplete, existingSchools, isAdmin 
 
           // Parse Upload Status
           let statusUpload: "SUDAH" | "BELUM" = "BELUM";
-          if (uploadIdx !== -1) {
-            const upVal = columns[uploadIdx]?.replace(/^["']|["']$/g, "").toUpperCase();
-            if (upVal === "SUDAH" || upVal === "YES" || upVal === "1" || upVal === "TRUE") {
+          if (uploadIdx !== -1 && uploadIdx < columns.length) {
+            const upVal = columns[uploadIdx]?.replace(/^["']|["']$/g, "").trim().toUpperCase();
+            if (
+              upVal === "SUDAH" || 
+              upVal === "YA" || 
+              upVal === "YES" || 
+              upVal === "1" || 
+              upVal === "TRUE" || 
+              upVal === "Y" ||
+              upVal === "OK" ||
+              upVal === "DONE" ||
+              upVal === "TERKIRIM"
+            ) {
               statusUpload = "SUDAH";
             }
           }
 
           // Parse Verifikasi Status
           let statusVerifikasi: "SUDAH" | "BELUM" = "BELUM";
-          if (verifikasiIdx !== -1) {
-            const verVal = columns[verifikasiIdx]?.replace(/^["']|["']$/g, "").toUpperCase();
-            if (verVal === "SUDAH" || verVal === "YES" || verVal === "1" || verVal === "TRUE") {
+          if (verifikasiIdx !== -1 && verifikasiIdx < columns.length) {
+            const verVal = columns[verifikasiIdx]?.replace(/^["']|["']$/g, "").trim().toUpperCase();
+            if (
+              verVal === "SUDAH" || 
+              verVal === "YA" || 
+              verVal === "YES" || 
+              verVal === "1" || 
+              verVal === "TRUE" || 
+              verVal === "Y" ||
+              verVal === "OK" ||
+              verVal === "DONE" ||
+              verVal === "VERIFIED" ||
+              verVal === "TERVERIFIKASI"
+            ) {
               statusVerifikasi = "SUDAH";
             }
           }
