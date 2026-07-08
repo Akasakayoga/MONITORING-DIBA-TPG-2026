@@ -12,7 +12,8 @@ import {
   RefreshCw,
   FileText,
   Download,
-  AlertCircle
+  AlertCircle,
+  Lock
 } from "lucide-react";
 
 interface SchoolTableProps {
@@ -21,6 +22,7 @@ interface SchoolTableProps {
   onAddSchool: (school: Omit<School, "no">) => void;
   onDeleteSchool: (npsn: string) => void;
   onResetData: () => void;
+  isAdmin?: boolean;
 }
 
 export default function SchoolTable({
@@ -28,7 +30,8 @@ export default function SchoolTable({
   onUpdateSchool,
   onAddSchool,
   onDeleteSchool,
-  onResetData
+  onResetData,
+  isAdmin = false
 }: SchoolTableProps) {
   // Filters & Search State
   const [searchQuery, setSearchQuery] = useState("");
@@ -173,29 +176,72 @@ export default function SchoolTable({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setShowAddForm(!showAddForm)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-xs transition"
-          >
-            <Plus size={16} />
-            Tambah Sekolah
-          </button>
+          {isAdmin ? (
+            <button
+              onClick={() => setShowAddForm(!showAddForm)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-xs transition cursor-pointer"
+            >
+              <Plus size={16} />
+              Tambah Sekolah
+            </button>
+          ) : (
+            <button
+              disabled
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 text-slate-400 border border-slate-200 rounded-xl text-xs font-semibold cursor-not-allowed opacity-75 shadow-xs transition"
+              title="Tambah Sekolah dinonaktifkan (Mode Lihat Saja)"
+            >
+              <Lock size={13} className="text-slate-400" />
+              Tambah Sekolah
+            </button>
+          )}
+
           <button
             onClick={handleExportCSV}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold transition"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer"
           >
             <Download size={16} />
             Ekspor Rekap CSV
           </button>
-          <button
-            onClick={onResetData}
-            title="Reset ke Data Asli (194 Sekolah)"
-            className="p-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-xl hover:text-slate-950 transition"
-          >
-            <RefreshCw size={16} />
-          </button>
+
+          {isAdmin ? (
+            <button
+              onClick={onResetData}
+              title="Reset ke Data Asli (194 Sekolah)"
+              className="p-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-xl hover:text-slate-950 transition cursor-pointer"
+            >
+              <RefreshCw size={16} />
+            </button>
+          ) : (
+            <button
+              disabled
+              title="Sengaja dinonaktifkan (Mode Lihat Saja)"
+              className="p-2 bg-slate-100 border border-slate-200 text-slate-400 rounded-xl cursor-not-allowed opacity-75 transition"
+            >
+              <RefreshCw size={16} />
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Mode Alert Banner */}
+      {isAdmin ? (
+        <div className="bg-emerald-50 border-b border-emerald-100/70 px-5 py-3 flex items-center gap-3 text-xs text-emerald-800">
+          <span className="flex h-2 w-2 relative shrink-0">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          </span>
+          <p className="leading-relaxed">
+            <strong>Mode Administrator Aktif:</strong> Anda memiliki akses penuh. Anda bisa klik status <strong>UPLOAD</strong> atau status <strong>VERIFIKASI</strong> di tabel di bawah untuk memperbarui datanya secara instan. Anda juga dapat menambah atau menghapus sekolah.
+          </p>
+        </div>
+      ) : (
+        <div className="bg-amber-50/60 border-b border-amber-100/50 px-5 py-3 flex items-center gap-3 text-xs text-amber-800">
+          <Lock size={14} className="text-amber-600 shrink-0" />
+          <p className="leading-relaxed">
+            <strong>Mode Pemantauan Terbatas (Read-Only):</strong> Fitur penambahan data, penghapusan data, dan manipulasi status usulan sengaja dinonaktifkan untuk publik. Data di bawah ini bersifat informatif untuk memantau progress pengunggahan berkas TPG.
+          </p>
+        </div>
+      )}
 
       {/* Add School Drawer/Form */}
       {showAddForm && (
@@ -430,82 +476,140 @@ export default function SchoolTable({
                     </td>
                     <td className="py-3.5 px-4 font-medium text-slate-500">{school.kabKota}</td>
 
-                    {/* Status Upload Toggle */}
+                     {/* Status Upload Toggle */}
                     <td className="py-3.5 px-4 text-center">
-                      <button
-                        onClick={() => {
-                          const nextVal = school.statusUpload === "SUDAH" ? "BELUM" : "SUDAH";
-                          onUpdateSchool(school.npsn, {
-                            statusUpload: nextVal,
-                            // If we toggle upload to BELUM, we must auto-toggle verifikasi to BELUM as well
-                            statusVerifikasi: nextVal === "BELUM" ? "BELUM" : school.statusVerifikasi
-                          });
-                        }}
-                        className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold transition hover:scale-105 border cursor-pointer ${
-                          school.statusUpload === "SUDAH"
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            : "bg-amber-50 text-amber-700 border-amber-200"
-                        }`}
-                        title="Klik untuk mengubah status upload berkas"
-                      >
-                        {school.statusUpload === "SUDAH" ? (
-                          <>
-                            <CheckCircle2 size={12} className="text-emerald-600" />
-                            <span>SUDAH</span>
-                          </>
-                        ) : (
-                          <>
-                            <XCircle size={12} className="text-amber-500" />
-                            <span>BELUM</span>
-                          </>
-                        )}
-                      </button>
+                      {isAdmin ? (
+                        <button
+                          onClick={() => {
+                            const nextVal = school.statusUpload === "SUDAH" ? "BELUM" : "SUDAH";
+                            onUpdateSchool(school.npsn, {
+                              statusUpload: nextVal,
+                              // If we toggle upload to BELUM, we must auto-toggle verifikasi to BELUM as well
+                              statusVerifikasi: nextVal === "BELUM" ? "BELUM" : school.statusVerifikasi
+                            });
+                          }}
+                          className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold transition hover:scale-105 border cursor-pointer ${
+                            school.statusUpload === "SUDAH"
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : "bg-amber-50 text-amber-700 border-amber-200"
+                          }`}
+                          title="Klik untuk mengubah status upload berkas"
+                        >
+                          {school.statusUpload === "SUDAH" ? (
+                            <>
+                              <CheckCircle2 size={12} className="text-emerald-600" />
+                              <span>SUDAH</span>
+                            </>
+                          ) : (
+                            <>
+                              <XCircle size={12} className="text-amber-500" />
+                              <span>BELUM</span>
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <div
+                          className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold border cursor-default ${
+                            school.statusUpload === "SUDAH"
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : "bg-amber-50 text-amber-700 border-amber-200"
+                          }`}
+                          title={school.statusUpload === "SUDAH" ? "Sudah Unggah Berkas" : "Belum Unggah Berkas"}
+                        >
+                          {school.statusUpload === "SUDAH" ? (
+                            <>
+                              <CheckCircle2 size={12} className="text-emerald-600" />
+                              <span>SUDAH</span>
+                            </>
+                          ) : (
+                            <>
+                              <XCircle size={12} className="text-amber-500" />
+                              <span>BELUM</span>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </td>
 
                     {/* Status Verifikasi Toggle */}
                     <td className="py-3.5 px-4 text-center">
-                      <button
-                        disabled={school.statusUpload === "BELUM"}
-                        onClick={() => {
-                          const nextVal = school.statusVerifikasi === "SUDAH" ? "BELUM" : "SUDAH";
-                          onUpdateSchool(school.npsn, { statusVerifikasi: nextVal });
-                        }}
-                        className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold transition border disabled:opacity-50 disabled:hover:scale-100 ${
-                          school.statusUpload === "BELUM"
-                            ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
-                            : school.statusVerifikasi === "SUDAH"
-                            ? "bg-indigo-50 text-indigo-700 border-indigo-200 hover:scale-105 cursor-pointer"
-                            : "bg-rose-50 text-rose-700 border-rose-200 hover:scale-105 cursor-pointer"
-                        }`}
-                        title={school.statusUpload === "BELUM" ? "Harus unggah berkas terlebih dahulu" : "Klik untuk mengubah status verifikasi"}
-                      >
-                        {school.statusVerifikasi === "SUDAH" ? (
-                          <>
-                            <CheckCircle2 size={12} className="text-indigo-600" />
-                            <span>SUDAH</span>
-                          </>
-                        ) : (
-                          <>
-                            <XCircle size={12} className="text-rose-500" />
-                            <span>BELUM</span>
-                          </>
-                        )}
-                      </button>
+                      {isAdmin ? (
+                        <button
+                          disabled={school.statusUpload === "BELUM"}
+                          onClick={() => {
+                            const nextVal = school.statusVerifikasi === "SUDAH" ? "BELUM" : "SUDAH";
+                            onUpdateSchool(school.npsn, { statusVerifikasi: nextVal });
+                          }}
+                          className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold transition border disabled:opacity-50 disabled:hover:scale-100 ${
+                            school.statusUpload === "BELUM"
+                              ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                              : school.statusVerifikasi === "SUDAH"
+                              ? "bg-indigo-50 text-indigo-700 border-indigo-200 hover:scale-105 cursor-pointer"
+                              : "bg-rose-50 text-rose-700 border-rose-200 hover:scale-105 cursor-pointer"
+                          }`}
+                          title={school.statusUpload === "BELUM" ? "Harus unggah berkas terlebih dahulu" : "Klik untuk mengubah status verifikasi"}
+                        >
+                          {school.statusVerifikasi === "SUDAH" && school.statusUpload === "SUDAH" ? (
+                            <>
+                              <CheckCircle2 size={12} className="text-indigo-600" />
+                              <span>SUDAH</span>
+                            </>
+                          ) : (
+                            <>
+                              <XCircle size={12} className="text-rose-500" />
+                              <span>BELUM</span>
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <div
+                          className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold border cursor-default ${
+                            school.statusUpload === "BELUM"
+                              ? "bg-slate-100 text-slate-400 border-slate-200"
+                              : school.statusVerifikasi === "SUDAH"
+                              ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+                              : "bg-rose-50 text-rose-700 border-rose-200"
+                          }`}
+                          title={school.statusUpload === "BELUM" ? "Belum Unggah Berkas" : school.statusVerifikasi === "SUDAH" ? "Sudah Terverifikasi" : "Belum Terverifikasi"}
+                        >
+                          {school.statusVerifikasi === "SUDAH" && school.statusUpload === "SUDAH" ? (
+                            <>
+                              <CheckCircle2 size={12} className="text-indigo-600" />
+                              <span>SUDAH</span>
+                            </>
+                          ) : (
+                            <>
+                              <XCircle size={12} className="text-rose-500" />
+                              <span>BELUM</span>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </td>
 
                     {/* Action column (Delete) */}
                     <td className="py-3.5 px-4 text-center">
-                      <button
-                        onClick={() => {
-                          if (window.confirm(`Hapus sekolah "${school.nama}"?`)) {
-                            onDeleteSchool(school.npsn);
-                          }
-                        }}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
-                        title="Hapus Lembaga"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {isAdmin ? (
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Hapus sekolah "${school.nama}"?`)) {
+                              onDeleteSchool(school.npsn);
+                            }
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition cursor-pointer"
+                          title="Hapus Lembaga"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      ) : (
+                        <button
+                          disabled
+                          className="p-1.5 text-slate-300 rounded-lg cursor-not-allowed opacity-50"
+                          title="Hapus lembaga dinonaktifkan (Mode Lihat Saja)"
+                        >
+                          <Lock size={13} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );

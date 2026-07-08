@@ -8,15 +8,17 @@ import {
   Check,
   Database,
   ArrowRight,
-  RefreshCw
+  RefreshCw,
+  Lock
 } from "lucide-react";
 
 interface ImportDataProps {
   onImportComplete: (imported: Omit<School, "no">[], mode: "merge" | "overwrite") => void;
   existingSchools: School[];
+  isAdmin?: boolean;
 }
 
-export default function ImportData({ onImportComplete, existingSchools }: ImportDataProps) {
+export default function ImportData({ onImportComplete, existingSchools, isAdmin = false }: ImportDataProps) {
   const [dragActive, setDragActive] = useState(false);
   const [fileName, setFileName] = useState("");
   const [parsedData, setParsedData] = useState<Omit<School, "no">[]>([]);
@@ -237,6 +239,32 @@ export default function ImportData({ onImportComplete, existingSchools }: Import
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Read-Only Alert Banner covering full width of the view */}
+      {isAdmin ? (
+        <div className="lg:col-span-3 bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center gap-3 text-xs text-emerald-800 shadow-xs">
+          <span className="flex h-2 w-2 relative shrink-0">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          </span>
+          <div>
+            <p className="font-bold">Mode Administrator Aktif (Akses Sinkronisasi Terbuka)</p>
+            <p className="mt-0.5 text-slate-600 font-medium">
+              Anda memiliki wewenang untuk memperbarui pangkalan data melalui unggahan CSV. Anda dapat memilih metode penggabungan (merge) atau penulisan ulang (overwrite), lalu mengklik tombol <strong>Terapkan Sinkronisasi Data</strong> untuk menyimpan perubahan.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="lg:col-span-3 bg-amber-50/60 border border-amber-100 rounded-2xl p-4 flex items-center gap-3 text-xs text-amber-800 shadow-xs">
+          <Lock size={16} className="text-amber-600 shrink-0" />
+          <div>
+            <p className="font-bold">Mode Pemantauan Terbatas (Read-Only)</p>
+            <p className="mt-0.5 text-slate-600 font-medium">
+              Halaman sinkronisasi CSV saat ini dinonaktifkan untuk publik. Anda tetap dapat mengunduh templat, mengunggah file untuk menguji dan mempratinjau data sekolah, namun tombol penulisan / penyimpanan ke database dinonaktifkan.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Upload Zone & Config */}
       <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-xs space-y-6">
         <div className="space-y-1">
@@ -363,13 +391,24 @@ export default function ImportData({ onImportComplete, existingSchools }: Import
         )}
 
         {parsedData.length > 0 && (
-          <button
-            onClick={handleApplyImport}
-            className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition cursor-pointer flex items-center justify-center gap-2"
-          >
-            Terapkan Sinkronisasi Data
-            <ArrowRight size={14} />
-          </button>
+          isAdmin ? (
+            <button
+              onClick={handleApplyImport}
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition cursor-pointer flex items-center justify-center gap-2"
+            >
+              Terapkan Sinkronisasi Data
+              <ArrowRight size={14} />
+            </button>
+          ) : (
+            <button
+              disabled
+              className="w-full py-2.5 bg-slate-100 border border-slate-200 text-slate-400 rounded-xl text-xs font-bold transition cursor-not-allowed flex items-center justify-center gap-2"
+              title="Sinkronisasi dinonaktifkan (Mode Lihat Saja)"
+            >
+              <Lock size={14} className="text-slate-400" />
+              Terapkan Sinkronisasi (Mode Lihat Saja)
+            </button>
+          )
         )}
       </div>
 

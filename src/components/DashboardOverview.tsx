@@ -30,9 +30,10 @@ import {
 interface DashboardOverviewProps {
   schools: School[];
   lastUpdated?: string;
+  periode?: string;
 }
 
-export default function DashboardOverview({ schools, lastUpdated }: DashboardOverviewProps) {
+export default function DashboardOverview({ schools, lastUpdated, periode }: DashboardOverviewProps) {
   // --- INTERACTIVE MATRIX STATES ---
   const [selectedRegion, setSelectedRegion] = useState<string>("Kabupaten Ciamis");
   const [selectedJenjang, setSelectedJenjang] = useState<string>("SMKN");
@@ -215,7 +216,14 @@ export default function DashboardOverview({ schools, lastUpdated }: DashboardOve
       {/* Welcome / Meta Info Banner */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-indigo-900 text-white rounded-2xl p-6 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="space-y-1">
-          <h2 className="text-base sm:text-lg font-extrabold tracking-tight uppercase">Monitoring Usulan TPG KCD Wilayah XIII</h2>
+          <h2 className="text-base sm:text-lg font-extrabold tracking-tight uppercase flex flex-wrap items-center gap-2">
+            Monitoring Usulan TPG KCD Wilayah XIII
+            {periode && (
+              <span className="text-[11px] font-extrabold bg-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full border border-indigo-400/20 lowercase first-letter:uppercase tracking-normal">
+                periode {periode}
+              </span>
+            )}
+          </h2>
           <p className="text-slate-300 text-xs">
             Sistem rekapitulasi data usulan Tunjangan Profesi Guru berdasarkan status pengunggahan berkas digital dari sekolah.
           </p>

@@ -16,7 +16,10 @@ import {
   XCircle,
   AlertTriangle,
   Info,
-  X
+  X,
+  Calendar,
+  Edit3,
+  Lock
 } from "lucide-react";
 
 interface Toast {
@@ -71,6 +74,11 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<"overview" | "schools" | "import" | "notifications">("overview");
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [showNotificationPopup, setShowNotificationPopup] = useState(false);
+  const [periode, setPeriode] = useState<string>(() => {
+    return localStorage.getItem("diba_gtk_periode") || "Juli 2026";
+  });
+  const [isEditingPeriod, setIsEditingPeriod] = useState(false);
+  const [tempPeriod, setTempPeriod] = useState(periode);
   const [lastUpdated, setLastUpdated] = useState<string>(() => {
     const saved = localStorage.getItem("diba_gtk_last_updated");
     if (saved) return saved;
@@ -83,14 +91,30 @@ export default function App() {
     }) + " WIB";
   });
 
+  // --- ADMIN MODE STATES ---
+  const [isAdmin, setIsAdmin] = useState<boolean>(() => {
+    return localStorage.getItem("diba_gtk_is_admin") === "true";
+  });
+  const [showAdminModal, setShowAdminModal] = useState(false);
+  const [passcode, setPasscode] = useState("");
+  const [passcodeError, setPasscodeError] = useState("");
+
   // --- LOCAL PERSISTENCE ---
   useEffect(() => {
     localStorage.setItem("diba_gtk_schools", JSON.stringify(schools));
   }, [schools]);
 
   useEffect(() => {
+    localStorage.setItem("diba_gtk_is_admin", isAdmin ? "true" : "false");
+  }, [isAdmin]);
+
+  useEffect(() => {
     localStorage.setItem("diba_gtk_notifications", JSON.stringify(notifications));
   }, [notifications]);
+
+  useEffect(() => {
+    localStorage.setItem("diba_gtk_periode", periode);
+  }, [periode]);
 
   // --- LIVE TICKING CLOCK ---
   useEffect(() => {
@@ -408,6 +432,18 @@ export default function App() {
     }
   };
 
+  // --- ADMIN PASSCODE VERIFICATION ---
+  const handleVerifyPasscode = () => {
+    if (passcode.trim() === "ginginfaujiyanti") {
+      setIsAdmin(true);
+      setShowAdminModal(false);
+      setPasscode("");
+      addToast("Akses Diterima", "Mode Administrator aktif. Seluruh fitur edit, tambah, & hapus data telah dibuka.", "success");
+    } else {
+      setPasscodeError("Passcode salah. Silakan coba lagi.");
+    }
+  };
+
   // --- NOTIFICATION MANIPULATION ---
   const handleMarkAllNotificationsAsRead = () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
@@ -440,13 +476,102 @@ export default function App() {
                 <SchoolIcon size={20} />
               </div>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <h1 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight">
                     DIBA GTK TPG MONITORING KCD XIII
                   </h1>
-                  <span className="hidden sm:inline-flex items-center gap-1 text-[9px] font-extrabold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                  <span className="hidden sm:inline-flex items-center gap-1 text-[9px] font-extrabold bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full uppercase tracking-wider">
                     <Sparkles size={10} /> Live
                   </span>
+
+                  {/* Interactive Period Selector Badge */}
+                  <div className="relative inline-block">
+                    <button
+                      onClick={() => {
+                        setTempPeriod(periode);
+                        setIsEditingPeriod(!isEditingPeriod);
+                      }}
+                      className="inline-flex items-center gap-1 text-[10px] font-extrabold bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition px-2 py-0.5 rounded-full border border-emerald-200 cursor-pointer shadow-xs"
+                      title="Klik untuk mengubah periode usulan"
+                    >
+                      <Calendar size={10} className="text-emerald-600 shrink-0" />
+                      <span>Periode: {periode}</span>
+                      <Edit3 size={8} className="opacity-60 shrink-0" />
+                    </button>
+
+                    <AnimatePresence>
+                      {isEditingPeriod && (
+                        <>
+                          {/* Close backdrop */}
+                          <div className="fixed inset-0 z-40" onClick={() => setIsEditingPeriod(false)} />
+                          
+                          <motion.div
+                            initial={{ opacity: 0, y: 5, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 5, scale: 0.95 }}
+                            transition={{ duration: 0.12 }}
+                            className="absolute left-0 mt-1.5 w-64 bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-3 space-y-3 text-left"
+                          >
+                            <div className="space-y-0.5">
+                              <h5 className="font-extrabold text-xs text-slate-800 flex items-center gap-1.5">
+                                <Calendar size={12} className="text-emerald-600" />
+                                Pilih Periode Usulan TPG
+                              </h5>
+                              <p className="text-[10px] text-slate-400 font-medium">Ubah periode monitoring aktif secara real-time.</p>
+                            </div>
+
+                            {/* Presets */}
+                            <div className="grid grid-cols-2 gap-1">
+                              {["Juli 2026", "Agustus 2026", "September 2026", "Triwulan I 2026", "Triwulan II 2026", "Triwulan III 2026"].map((p) => (
+                                <button
+                                  key={p}
+                                  onClick={() => {
+                                    setPeriode(p);
+                                    setTempPeriod(p);
+                                    setIsEditingPeriod(false);
+                                    addToast("Periode Diubah", `Periode usulan TPG berhasil diubah ke ${p}.`, "success");
+                                  }}
+                                  className={`py-1 px-1.5 rounded text-[10px] font-bold text-left transition border cursor-pointer ${
+                                    periode === p
+                                      ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                                      : "bg-slate-50 hover:bg-slate-100 border-slate-100 text-slate-600"
+                                  }`}
+                                >
+                                  {p}
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* Custom text option */}
+                            <div className="border-t border-slate-100 pt-2 space-y-1">
+                              <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Atur Kustom Periode</label>
+                              <div className="flex gap-1">
+                                <input
+                                  type="text"
+                                  placeholder="Contoh: Oktober 2026"
+                                  value={tempPeriod}
+                                  onChange={(e) => setTempPeriod(e.target.value)}
+                                  className="flex-1 px-2 py-1 border border-slate-200 rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                />
+                                <button
+                                  onClick={() => {
+                                    if (tempPeriod.trim()) {
+                                      setPeriode(tempPeriod.trim());
+                                      setIsEditingPeriod(false);
+                                      addToast("Periode Diubah", `Periode usulan TPG berhasil diubah ke ${tempPeriod.trim()}.`, "success");
+                                    }
+                                  }}
+                                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-2 py-1 rounded text-[10px] transition cursor-pointer"
+                                >
+                                  Set
+                                </button>
+                              </div>
+                            </div>
+                          </motion.div>
+                        </>
+                      )}
+                    </AnimatePresence>
+                  </div>
                 </div>
                 <p className="text-[10px] text-slate-400 font-medium">
                   Manajemen Data Verifikasi Usulan Tunjangan Profesi Guru
@@ -467,6 +592,34 @@ export default function App() {
                 <Clock size={13} className="text-indigo-600 animate-pulse" />
                 <span className="font-mono">{formattedTime}</span>
               </div>
+
+              {/* Admin Mode Toggle Button */}
+              {isAdmin ? (
+                <button
+                  onClick={() => {
+                    setIsAdmin(false);
+                    addToast("Keluar Admin", "Anda telah keluar dari Mode Administrator.", "info");
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold transition cursor-pointer shadow-xs"
+                  title="Klik untuk Keluar dari Mode Administrator"
+                >
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                  <span>Mode Admin: Aktif</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    setPasscode("");
+                    setPasscodeError("");
+                    setShowAdminModal(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold transition cursor-pointer shadow-xs"
+                  title="Masuk sebagai Administrator untuk fitur Edit/Tambah"
+                >
+                  <Lock size={12} className="text-slate-400 shrink-0" />
+                  <span>Masuk Admin</span>
+                </button>
+              )}
 
               {/* Notification Center Bell Indicator */}
               <div className="relative">
@@ -701,7 +854,7 @@ export default function App() {
             transition={{ duration: 0.2 }}
             className="focus:outline-none"
           >
-            {activeTab === "overview" && <DashboardOverview schools={schools} lastUpdated={lastUpdated} />}
+            {activeTab === "overview" && <DashboardOverview schools={schools} lastUpdated={lastUpdated} periode={periode} />}
 
             {activeTab === "schools" && (
               <SchoolTable
@@ -710,11 +863,12 @@ export default function App() {
                 onAddSchool={handleAddSchool}
                 onDeleteSchool={handleDeleteSchool}
                 onResetData={handleResetData}
+                isAdmin={isAdmin}
               />
             )}
 
             {activeTab === "import" && (
-              <ImportData onImportComplete={handleImportSchools} existingSchools={schools} />
+              <ImportData onImportComplete={handleImportSchools} existingSchools={schools} isAdmin={isAdmin} />
             )}
 
             {activeTab === "notifications" && (
@@ -742,6 +896,101 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      {/* --- ADMIN PASSCODE VERIFICATION MODAL --- */}
+      <AnimatePresence>
+        {showAdminModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowAdminModal(false)}
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs"
+            />
+
+            {/* Modal Body */}
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 15 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 15 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-100 relative z-10 overflow-hidden space-y-4 text-left"
+            >
+              <div className="flex justify-between items-start">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-indigo-50 text-indigo-700 rounded-xl">
+                    <Lock size={18} />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-slate-900 text-sm sm:text-base">Akses Mode Administrator</h3>
+                    <p className="text-[10px] text-slate-400 font-medium">Verifikasi identitas untuk mengaktifkan fitur edit & tambah.</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowAdminModal(false)}
+                  className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="space-y-1.5 pt-2">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                  Passcode Akses
+                </label>
+                <div className="relative">
+                  <input
+                    type="password"
+                    placeholder="Masukkan passcode..."
+                    value={passcode}
+                    onChange={(e) => {
+                      setPasscode(e.target.value);
+                      setPasscodeError("");
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        handleVerifyPasscode();
+                      }
+                    }}
+                    className={`w-full px-3.5 py-2.5 border rounded-xl text-xs focus:outline-none transition ${
+                      passcodeError
+                        ? "border-rose-300 focus:ring-1 focus:ring-rose-500"
+                        : "border-slate-200 focus:ring-1 focus:ring-indigo-500"
+                    }`}
+                    autoFocus
+                  />
+                </div>
+                {passcodeError ? (
+                  <p className="text-[10px] text-rose-600 font-semibold">{passcodeError}</p>
+                ) : (
+                  <p className="text-[10px] text-slate-400 font-medium">
+                    Gunakan kode <code className="bg-slate-100 text-slate-700 font-mono px-1 py-0.5 rounded font-bold">1234</code> untuk tujuan pengetesan langsung.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAdminModal(false)}
+                  className="flex-1 py-2 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl text-xs font-bold transition cursor-pointer text-center"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleVerifyPasscode}
+                  className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition cursor-pointer text-center"
+                >
+                  Masuk Admin
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
